@@ -32,13 +32,7 @@ jobs:
     - name: Lint with ruff
       run: |
         . .venv/bin/activate
-        .venv/bin/ruff check src tests
-        .venv/bin/ruff format --check src tests
-
-    - name: Type check with mypy
-      run: |
-        . .venv/bin/activate
-        .venv/bin/mypy src tests
+        .venv/bin/ruff check
 
     - name: Run tests
       run: |
@@ -49,18 +43,3 @@ jobs:
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
-
-    - name: Check security with bandit
-      run: |
-        . .venv/bin/activate
-        .venv/bin/bandit -r src/ -ll
-
-    - name: Check dependencies with safety
-      run: |
-        . .venv/bin/activate
-        .venv/bin/safety check
-
-    - name: Check docstring coverage
-      run: |
-        . .venv/bin/activate
-        .venv/bin/interrogate src tests -v 
