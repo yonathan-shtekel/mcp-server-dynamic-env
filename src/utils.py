@@ -69,7 +69,8 @@ def extract_service_name(pod) -> str:
 def create_pod_info(pod, service_name: str) -> PodInfo:
     """Create PodInfo from a pod"""
     container_statuses = pod.status.container_statuses or []
-    is_ready = all(cs.ready for cs in container_statuses)
+    # Pod is only ready if it has containers and all are ready
+    is_ready = bool(container_statuses) and all(cs.ready for cs in container_statuses)
 
     return PodInfo(
         name=pod.metadata.name,

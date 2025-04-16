@@ -85,7 +85,7 @@ class DynamicEnvSummary(BaseModel):
 
     model_config = ConfigDict(
         extra='allow',
-        populate_by_name=True
+        frozen=True
     )
 
     @classmethod
@@ -175,6 +175,11 @@ class DynamicEnvStatusResponse(BaseModel):
     state: str | None = None
     totalCount: int | None = None
     totalReady: int | None = None
-    deployments: list[DeploymentStatusSummary] = []
-    pods_by_service: dict[str, list[PodInfo]] = {}
+    deployments: list[DeploymentStatusSummary] = Field(default_factory=list)
+    pods_by_service: dict[str, list[PodInfo]] = Field(default_factory=dict)
     logs: dict[str, dict[str, str]] | None = None
+
+    model_config = ConfigDict(
+        extra='allow',
+        validate_assignment=True
+    )

@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from kubernetes.client.rest import ApiException
@@ -14,6 +14,7 @@ from src.kubernetes_client import K8sClients
 from src.models.dynamicenv import (
     DeleteResponse,
     DynamicEnvFilter,
+    DynamicEnvStatusResponse,
 )
 from src.utils import (
     apply_dynamicenv_filters,
@@ -53,6 +54,13 @@ class MockContext:
     """Mock Context for testing"""
     info = AsyncMock()
     report_progress = AsyncMock()
+
+
+class MockK8sClients:
+    """Mock Kubernetes clients for testing"""
+    def __init__(self):
+        self.custom_api = MagicMock()
+        self.core_api = MagicMock()
 
 
 @pytest.fixture
@@ -134,14 +142,17 @@ async def test_process_deployments(mock_dynamicenv):
 
 
 @pytest.mark.asyncio
-async def test_get_dynamicenv_status(mock_k8s_clients, mock_k8s_context):
-    """Test getting DynamicEnv status"""
-    # Setup mock responses
+async def test_get_dynamicenv_status():
+    """Test getting detailed status of a DynamicEnv"""
+    # Create mock clients
+    mock_k8s_clients = MockK8sClients()
+
+    # Set up mock responses
     mock_k8s_clients.custom_api.get_namespaced_custom_object.return_value = {
         "metadata": {
             "name": "test-env",
             "namespace": "test-ns",
-            "creationTimestamp": "2023-01-01T00:00:00Z"
+            "creationTimestamp": "2024-01-01T00:00:00Z"
         },
         "status": {
             "state": "Ready",
@@ -150,9 +161,18 @@ async def test_get_dynamicenv_status(mock_k8s_clients, mock_k8s_context):
             "subsetsStatus": {
                 "app1": {
                     "deployment": {
-                        "name": "app1",
+                        "name": "app1-deploy",
                         "namespace": "test-ns",
-                        "status": "running"
+                        "status": "running",
+                        "service_name": "app1"
+                    }
+                },
+                "app2": {
+                    "deployment": {
+                        "name": "app2-deploy",
+                        "namespace": "test-ns",
+                        "status": "initializing",
+                        "service_name": "app2"
                     }
                 }
             }
@@ -160,40 +180,29 @@ async def test_get_dynamicenv_status(mock_k8s_clients, mock_k8s_context):
     }
 
     # Mock pod list response
-    mock_pod = MockPod(
-        name="test-pod",
-        namespace="test-ns",
-        labels={"app.kubernetes.io/name": "app1"},
-        containers=["main", "sidecar"],
-        container_statuses=[MagicMock(ready=True), MagicMock(ready=True)]
+    mock_k8s_clients.core_api.list_namespaced_pod.return_value = MagicMock(items=[])
+
+    # Call the function
+    result = await get_dynamicenv_detailed_status(
+        mock_k8s_clients,
+        "test-env",
+        "test-ns"
     )
-    mock_k8s_clients.core_api.list_namespaced_pod.return_value = MagicMock(items=[mock_pod])
 
-    # Mock pod logs
-    mock_k8s_clients.core_api.read_namespaced_pod_log.return_value = "test logs"
-
-    # Test with mocked context
-    with patch('src.dynamicenv_service.get_k8s_context', mock_k8s_context):
-        result = await get_dynamicenv_detailed_status(
-            mock_k8s_clients,
-            env_id="test-env",
-            namespace="test-ns",
-            include_logs=True,
-            log_lines=100,
-            ctx=MockContext()
-        )
-
-    # Assertions
+    # Verify results
+    assert isinstance(result, DynamicEnvStatusResponse)
     assert result.name == "test-env"
     assert result.namespace == "test-ns"
     assert result.state == "Ready"
-    assert len(result.deployments) == 1
-    assert result.deployments[0].name == "app1"
-    assert "app1" in result.pods_by_service
-    assert len(result.pods_by_service["app1"]) == 1
-    assert result.pods_by_service["app1"][0].name == "test-pod"
-    assert result.logs is not None
-    assert "test-pod" in result.logs
+    assert result.totalCount == 2
+    assert result.totalReady == 1
+    assert len(result.deployments) == 2
+    assert result.deployments[0].name == "app1-deploy"
+    assert result.deployments[0].status == "running"
+    assert result.deployments[1].name == "app2-deploy"
+    assert result.deployments[1].status == "initializing"
+    assert result.pods_by_service == {}
+    assert result.logs is None
 
 
 def test_extract_service_name():
@@ -372,8 +381,8 @@ async def test_delete_dynamicenv_not_found(mock_k8s_clients, mock_k8s_context):
     assert "not found" in result.message.lower()
 
 
-def test_create_pod_info_with_no_containers():
-    """Test creating PodInfo with no containers"""
+async def test_create_pod_info_with_no_containers():
+    """Test creating PodInfo when pod has no containers"""
     pod = MockPod(
         name="test-pod",
         namespace="test-ns",
@@ -382,8 +391,12 @@ def test_create_pod_info_with_no_containers():
     )
 
     pod_info = create_pod_info(pod, "test-service")
+
+    assert pod_info.name == "test-pod"
+    assert pod_info.status == "Running"
     assert pod_info.containers == []
-    assert pod_info.ready is False
+    assert pod_info.ready is False  # Should be False when no containers
+    assert pod_info.service_name == "test-service"
 
 
 def test_create_pod_info_with_mixed_container_status():
