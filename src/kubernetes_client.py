@@ -10,8 +10,6 @@ from kubernetes.client.models.v1_delete_options import V1DeleteOptions
 from kubernetes.client.models.v1_pod_list import V1PodList
 from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
-from kubernetes.client.models.v1_self_subject_access_review import V1SelfSubjectAccessReview
-from kubernetes.client.models.v1_self_subject_access_review_spec import V1SelfSubjectAccessReviewSpec
 
 logger = logging.getLogger("dynamicenv")
 
@@ -130,8 +128,10 @@ async def get_k8s_context() -> AsyncIterator[K8sClients]:
         except ApiException as e:
             logger.error(f"Failed to validate Kubernetes access: {e}")
             if e.status == 401:
-                raise PermissionError("Kubernetes authentication failed - please check your credentials")
-            raise PermissionError(f"Kubernetes access error: {e.reason}")
+                raise PermissionError(
+                    "Kubernetes authentication failed - please check your credentials"
+                ) from e
+            raise PermissionError(f"Kubernetes access error: {e.reason}") from e
 
         try:
             yield clients
