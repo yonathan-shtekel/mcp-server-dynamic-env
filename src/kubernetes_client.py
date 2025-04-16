@@ -109,25 +109,39 @@ async def get_k8s_context() -> AsyncIterator[K8sClients]:
     """Get authenticated Kubernetes client"""
     try:
         # Try in-cluster config first
-        config.load_incluster_config()
-    except ConfigException:
-        # Fall back to kubeconfig
-        config.load_kube_config()
+        try:
+            config.load_incluster_config()
+            logger.info("Using in-cluster configuration")
+        except ConfigException:
+            # Fall back to kubeconfig
+            config.load_kube_config()
+            logger.info("Using local kubeconfig")
 
-    # Validate permissions
-    auth_api = client.AuthorizationV1Api()
-    try:
-        auth_api.create_self_subject_access_review(...)
-    except ApiException as e:
-        logger.error(f"Permission check failed: {e}")
-        raise PermissionError("Insufficient Kubernetes permissions") from e
+        # Get clients first
+        clients = get_k8s_clients()
 
-    clients = get_k8s_clients()
-    try:
-        yield clients
-    finally:
-        # Any cleanup if needed
-        pass
+        # Simple test to check access - just list namespaces
+        try:
+            core_api = client.CoreV1Api()
+            core_api.list_namespace(_request_timeout=2)
+            logger.info("Successfully validated Kubernetes access")
+        except ApiException as e:
+            logger.error(f"Failed to validate Kubernetes access: {e}")
+            if e.status == 401:
+                raise PermissionError(
+                    "Kubernetes authentication failed - please check your credentials"
+                ) from e
+            raise PermissionError(f"Kubernetes access error: {e.reason}") from e
+
+        try:
+            yield clients
+        finally:
+            # Any cleanup if needed
+            pass
+
+    except Exception as e:
+        logger.exception("Error setting up Kubernetes client")
+        raise RuntimeError(f"Failed to initialize Kubernetes client: {str(e)}") from e
 
 
 async def fetch_dynamicenv(clients: K8sClients, env_id: str, namespace: str,
